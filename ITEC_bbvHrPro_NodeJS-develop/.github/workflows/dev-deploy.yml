@@ -1,0 +1,59 @@
+name: Development CI/CD
+
+on:
+  push:
+    branches: ['develop']
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+      - run: npm ci
+      - run: |
+          npm run eslint
+          echo ${{ secrets.ENV_FILE }} > .env
+          ls -a
+
+  Deploy-to-server:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run:  ls -a
+
+      - name: rsync deployments
+        uses: burnett01/rsync-deployments@5.2.1
+        with:
+          switches: -avzr --delete --exclude-from='deployexclude.txt'
+          path: ./
+          remote_path: ./node/
+          remote_host: ${{ secrets.SSH_HOST }}
+          remote_user: ${{ secrets.SSH_USER }}
+          remote_key: ${{ secrets.SSH_PRIVATE_KEY }}
+          remote_port: 22000
+
+      - name: executing remote ssh commands using password
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          password: ${{ secrets.PASSWORD }}
+          port: 22000
+          script: |
+            cd node/
+            rm -f .env
+            echo "${{ secrets.ENV_FILE }}" > .env
+            npm install
+            npm run build
+            npm run migrate:reset
+            pm2 delete bbvhr
+            pm2 start "npm run start" --name bbvhr --watch            
+
+
